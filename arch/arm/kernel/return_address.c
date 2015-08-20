@@ -62,10 +62,15 @@ void *return_address(unsigned int level)
 #warning "TODO: return_address should use unwind tables"
 #endif
 
-void *return_address(unsigned int level)
-{
-	return NULL;
-}
+/* !!!hor is already defined as static inline return_address()
+ * in arch/arm/include/asm/ftrace.h
+ * 
+ * void *return_address(unsigned int level)
+ * {
+ * 	return NULL;
+ * }
+ * end !!!hor
+ */
 
 #endif /* if defined(CONFIG_FRAME_POINTER) && !defined(CONFIG_ARM_UNWIND) / else */
 
