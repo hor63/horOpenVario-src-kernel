@@ -155,9 +155,12 @@ struct netns_ipv4 {
 	int sysctl_tcp_invalid_ratelimit;
 	int sysctl_tcp_pacing_ss_ratio;
 	int sysctl_tcp_pacing_ca_ratio;
+	int sysctl_tcp_wmem[3];
+	int sysctl_tcp_rmem[3];
 	struct inet_timewait_death_row tcp_death_row;
 	int sysctl_max_syn_backlog;
 	int sysctl_tcp_fastopen;
+	const struct tcp_congestion_ops __rcu  *tcp_congestion_control;
 	struct tcp_fastopen_context __rcu *tcp_fastopen_ctx;
 	spinlock_t tcp_fastopen_ctx_lock;
 	unsigned int sysctl_tcp_fastopen_blackhole_timeout;

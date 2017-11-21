@@ -2409,8 +2409,8 @@ struct proto tcp_prot = {
 	.memory_allocated	= &tcp_memory_allocated,
 	.memory_pressure	= &tcp_memory_pressure,
 	.sysctl_mem		= sysctl_tcp_mem,
-	.sysctl_wmem		= sysctl_tcp_wmem,
-	.sysctl_rmem		= sysctl_tcp_rmem,
+	.sysctl_wmem_offset	= offsetof(struct net, ipv4.sysctl_tcp_wmem),
+	.sysctl_rmem_offset	= offsetof(struct net, ipv4.sysctl_tcp_rmem),
 	.max_header		= MAX_TCP_HEADER,
 	.obj_size		= sizeof(struct tcp_sock),
 	.slab_flags		= SLAB_TYPESAFE_BY_RCU,
@@ -2429,6 +2429,8 @@ EXPORT_SYMBOL(tcp_prot);
 static void __net_exit tcp_sk_exit(struct net *net)
 {
 	int cpu;
+
+	module_put(net->ipv4.tcp_congestion_control->owner);
 
 	for_each_possible_cpu(cpu)
 		inet_ctl_sock_destroy(*per_cpu_ptr(net->ipv4.tcp_sk, cpu));
@@ -2509,11 +2511,25 @@ static int __net_init tcp_sk_init(struct net *net)
 	net->ipv4.sysctl_tcp_invalid_ratelimit = HZ/2;
 	net->ipv4.sysctl_tcp_pacing_ss_ratio = 200;
 	net->ipv4.sysctl_tcp_pacing_ca_ratio = 120;
-
+	if (net != &init_net) {
+		memcpy(net->ipv4.sysctl_tcp_rmem,
+		       init_net.ipv4.sysctl_tcp_rmem,
+		       sizeof(init_net.ipv4.sysctl_tcp_rmem));
+		memcpy(net->ipv4.sysctl_tcp_wmem,
+		       init_net.ipv4.sysctl_tcp_wmem,
+		       sizeof(init_net.ipv4.sysctl_tcp_wmem));
+	}
 	net->ipv4.sysctl_tcp_fastopen = TFO_CLIENT_ENABLE;
 	spin_lock_init(&net->ipv4.tcp_fastopen_ctx_lock);
 	net->ipv4.sysctl_tcp_fastopen_blackhole_timeout = 60 * 60;
 	atomic_set(&net->ipv4.tfo_active_disable_times, 0);
+
+	/* Reno is always built in */
+	if (!net_eq(net, &init_net) &&
+	    try_module_get(init_net.ipv4.tcp_congestion_control->owner))
+		net->ipv4.tcp_congestion_control = init_net.ipv4.tcp_congestion_control;
+	else
+		net->ipv4.tcp_congestion_control = &tcp_reno;
 
 	return 0;
 fail:

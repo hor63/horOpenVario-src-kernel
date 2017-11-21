@@ -42,6 +42,28 @@ struct amdgpu_cgs_device {
 	struct amdgpu_device *adev =					\
 		((struct amdgpu_cgs_device *)cgs_device)->adev
 
+static void *amdgpu_cgs_register_pp_handle(struct cgs_device *cgs_device,
+			int (*call_back_func)(struct amd_pp_init *, void **))
+{
+	CGS_FUNC_ADEV;
+	struct amd_pp_init pp_init;
+	struct amd_powerplay *amd_pp;
+
+	if (call_back_func == NULL)
+		return NULL;
+
+	amd_pp = &(adev->powerplay);
+	pp_init.chip_family = adev->family;
+	pp_init.chip_id = adev->asic_type;
+	pp_init.pm_en = (amdgpu_dpm != 0 && !amdgpu_sriov_vf(adev)) ? true : false;
+	pp_init.feature_mask = amdgpu_pp_feature_mask;
+	pp_init.device = cgs_device;
+	if (call_back_func(&pp_init, &(amd_pp->pp_handle)))
+		return NULL;
+
+	return adev->powerplay.pp_handle;
+}
+
 static int amdgpu_cgs_alloc_gpu_mem(struct cgs_device *cgs_device,
 				    enum cgs_gpu_mem_type type,
 				    uint64_t size, uint64_t align,
@@ -889,10 +911,6 @@ static int amdgpu_cgs_get_active_displays_info(struct cgs_device *cgs_device,
 					  struct cgs_display_info *info)
 {
 	CGS_FUNC_ADEV;
-	struct amdgpu_crtc *amdgpu_crtc;
-	struct drm_device *ddev = adev->ddev;
-	struct drm_crtc *crtc;
-	uint32_t line_time_us, vblank_lines;
 	struct cgs_mode_info *mode_info;
 
 	if (info == NULL)
@@ -906,30 +924,43 @@ static int amdgpu_cgs_get_active_displays_info(struct cgs_device *cgs_device,
 		mode_info->ref_clock = adev->clock.spll.reference_freq;
 	}
 
-	if (adev->mode_info.num_crtc && adev->mode_info.mode_config_initialized) {
-		list_for_each_entry(crtc,
-				&ddev->mode_config.crtc_list, head) {
-			amdgpu_crtc = to_amdgpu_crtc(crtc);
-			if (crtc->enabled) {
-				info->active_display_mask |= (1 << amdgpu_crtc->crtc_id);
-				info->display_count++;
-			}
-			if (mode_info != NULL &&
-				crtc->enabled && amdgpu_crtc->enabled &&
-				amdgpu_crtc->hw_mode.clock) {
-				line_time_us = (amdgpu_crtc->hw_mode.crtc_htotal * 1000) /
-							amdgpu_crtc->hw_mode.clock;
-				vblank_lines = amdgpu_crtc->hw_mode.crtc_vblank_end -
-							amdgpu_crtc->hw_mode.crtc_vdisplay +
-							(amdgpu_crtc->v_border * 2);
-				mode_info->vblank_time_us = vblank_lines * line_time_us;
-				mode_info->refresh_rate = drm_mode_vrefresh(&amdgpu_crtc->hw_mode);
-				mode_info->ref_clock = adev->clock.spll.reference_freq;
-				mode_info = NULL;
+	if (!amdgpu_device_has_dc_support(adev)) {
+		struct amdgpu_crtc *amdgpu_crtc;
+		struct drm_device *ddev = adev->ddev;
+		struct drm_crtc *crtc;
+		uint32_t line_time_us, vblank_lines;
+
+		if (adev->mode_info.num_crtc && adev->mode_info.mode_config_initialized) {
+			list_for_each_entry(crtc,
+					&ddev->mode_config.crtc_list, head) {
+				amdgpu_crtc = to_amdgpu_crtc(crtc);
+				if (crtc->enabled) {
+					info->active_display_mask |= (1 << amdgpu_crtc->crtc_id);
+					info->display_count++;
+				}
+				if (mode_info != NULL &&
+					crtc->enabled && amdgpu_crtc->enabled &&
+					amdgpu_crtc->hw_mode.clock) {
+					line_time_us = (amdgpu_crtc->hw_mode.crtc_htotal * 1000) /
+								amdgpu_crtc->hw_mode.clock;
+					vblank_lines = amdgpu_crtc->hw_mode.crtc_vblank_end -
+								amdgpu_crtc->hw_mode.crtc_vdisplay +
+								(amdgpu_crtc->v_border * 2);
+					mode_info->vblank_time_us = vblank_lines * line_time_us;
+					mode_info->refresh_rate = drm_mode_vrefresh(&amdgpu_crtc->hw_mode);
+					mode_info->ref_clock = adev->clock.spll.reference_freq;
+					mode_info = NULL;
+				}
 			}
 		}
+	} else {
+		info->display_count = adev->pm.pm_display_cfg.num_display;
+		if (mode_info != NULL) {
+			mode_info->vblank_time_us = adev->pm.pm_display_cfg.min_vblank_time;
+			mode_info->refresh_rate = adev->pm.pm_display_cfg.vrefresh;
+			mode_info->ref_clock = adev->clock.spll.reference_freq;
+		}
 	}
-
 	return 0;
 }
 
@@ -1179,6 +1210,7 @@ static const struct cgs_ops amdgpu_cgs_ops = {
 	.is_virtualization_enabled = amdgpu_cgs_is_virtualization_enabled,
 	.enter_safe_mode = amdgpu_cgs_enter_safe_mode,
 	.lock_grbm_idx = amdgpu_cgs_lock_grbm_idx,
+	.register_pp_handle = amdgpu_cgs_register_pp_handle,
 };
 
 static const struct cgs_os_ops amdgpu_cgs_os_ops = {

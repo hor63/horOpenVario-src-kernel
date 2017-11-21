@@ -1459,6 +1459,7 @@ static inline int t4_memory_write(struct adapter *adap, int mtype, u32 addr,
 unsigned int t4_get_regs_len(struct adapter *adapter);
 void t4_get_regs(struct adapter *adap, void *buf, size_t buf_size);
 
+int t4_eeprom_ptov(unsigned int phys_addr, unsigned int fn, unsigned int sz);
 int t4_seeprom_wp(struct adapter *adapter, bool enable);
 int t4_get_raw_vpd_params(struct adapter *adapter, struct vpd_params *p);
 int t4_get_vpd_params(struct adapter *adapter, struct vpd_params *p);
@@ -1669,6 +1670,10 @@ int t4_fwaddrspace_write(struct adapter *adap, unsigned int mbox,
 void t4_read_pace_tbl(struct adapter *adap, unsigned int pace_vals[NTX_SCHED]);
 void t4_get_tx_sched(struct adapter *adap, unsigned int sched,
 		     unsigned int *kbps, unsigned int *ipg, bool sleep_ok);
+int t4_sge_ctxt_rd(struct adapter *adap, unsigned int mbox, unsigned int cid,
+		   enum ctxt_type ctype, u32 *data);
+int t4_sge_ctxt_rd_bd(struct adapter *adap, unsigned int cid,
+		      enum ctxt_type ctype, u32 *data);
 int t4_sched_params(struct adapter *adapter, int type, int level, int mode,
 		    int rateunit, int ratemode, int channel, int class,
 		    int minrate, int maxrate, int weight, int pktsize);

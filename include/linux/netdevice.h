@@ -4336,6 +4336,31 @@ void netdev_notice(const struct net_device *dev, const char *format, ...);
 __printf(2, 3)
 void netdev_info(const struct net_device *dev, const char *format, ...);
 
+#define netdev_level_once(level, dev, fmt, ...)			\
+do {								\
+	static bool __print_once __read_mostly;			\
+								\
+	if (!__print_once) {					\
+		__print_once = true;				\
+		netdev_printk(level, dev, fmt, ##__VA_ARGS__);	\
+	}							\
+} while (0)
+
+#define netdev_emerg_once(dev, fmt, ...) \
+	netdev_level_once(KERN_EMERG, dev, fmt, ##__VA_ARGS__)
+#define netdev_alert_once(dev, fmt, ...) \
+	netdev_level_once(KERN_ALERT, dev, fmt, ##__VA_ARGS__)
+#define netdev_crit_once(dev, fmt, ...) \
+	netdev_level_once(KERN_CRIT, dev, fmt, ##__VA_ARGS__)
+#define netdev_err_once(dev, fmt, ...) \
+	netdev_level_once(KERN_ERR, dev, fmt, ##__VA_ARGS__)
+#define netdev_warn_once(dev, fmt, ...) \
+	netdev_level_once(KERN_WARNING, dev, fmt, ##__VA_ARGS__)
+#define netdev_notice_once(dev, fmt, ...) \
+	netdev_level_once(KERN_NOTICE, dev, fmt, ##__VA_ARGS__)
+#define netdev_info_once(dev, fmt, ...) \
+	netdev_level_once(KERN_INFO, dev, fmt, ##__VA_ARGS__)
+
 #define MODULE_ALIAS_NETDEV(device) \
 	MODULE_ALIAS("netdev-" device)
 
@@ -4375,6 +4400,10 @@ do {								\
 #define netdev_WARN(dev, format, args...)			\
 	WARN(1, "netdevice: %s%s\n" format, netdev_name(dev),	\
 	     netdev_reg_state(dev), ##args)
+
+#define netdev_WARN_ONCE(dev, condition, format, arg...)		\
+	WARN_ONCE(1, "netdevice: %s%s\n" format, netdev_name(dev)	\
+		  netdev_reg_state(dev), ##args)
 
 /* netif printk helpers, similar to netdev_printk */
 
@@ -4450,15 +4479,7 @@ do {								\
  *	Why 16. Because with 16 the only overlap we get on a hash of the
  *	low nibble of the protocol value is RARP/SNAP/X.25.
  *
- *      NOTE:  That is no longer true with the addition of VLAN tags.  Not
- *             sure which should go first, but I bet it won't make much
- *             difference if we are running VLANs.  The good news is that
- *             this protocol won't be in the list unless compiled in, so
- *             the average user (w/out VLANs) will not be adversely affected.
- *             --BLG
- *
  *		0800	IP
- *		8100    802.1Q VLAN
  *		0001	802.3
  *		0002	AX.25
  *		0004	802.2

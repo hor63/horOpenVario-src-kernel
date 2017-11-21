@@ -2639,6 +2639,35 @@ void t4_get_regs(struct adapter *adap, void *buf, size_t buf_size)
 #define CHELSIO_VPD_UNIQUE_ID 0x82
 
 /**
+ * t4_eeprom_ptov - translate a physical EEPROM address to virtual
+ * @phys_addr: the physical EEPROM address
+ * @fn: the PCI function number
+ * @sz: size of function-specific area
+ *
+ * Translate a physical EEPROM address to virtual.  The first 1K is
+ * accessed through virtual addresses starting at 31K, the rest is
+ * accessed through virtual addresses starting at 0.
+ *
+ * The mapping is as follows:
+ * [0..1K) -> [31K..32K)
+ * [1K..1K+A) -> [31K-A..31K)
+ * [1K+A..ES) -> [0..ES-A-1K)
+ *
+ * where A = @fn * @sz, and ES = EEPROM size.
+ */
+int t4_eeprom_ptov(unsigned int phys_addr, unsigned int fn, unsigned int sz)
+{
+	fn *= sz;
+	if (phys_addr < 1024)
+		return phys_addr + (31 << 10);
+	if (phys_addr < 1024 + fn)
+		return 31744 - fn + phys_addr - 1024;
+	if (phys_addr < EEPROMSIZE)
+		return phys_addr - 1024 - fn;
+	return -EINVAL;
+}
+
+/**
  *	t4_seeprom_wp - enable/disable EEPROM write protection
  *	@adapter: the adapter
  *	@enable: whether to enable or disable write protection
@@ -9616,6 +9645,68 @@ void t4_get_tx_sched(struct adapter *adap, unsigned int sched,
 		v &= 0xffff;
 		*ipg = (10000 * v) / core_ticks_per_usec(adap);
 	}
+}
+
+/* t4_sge_ctxt_rd - read an SGE context through FW
+ * @adap: the adapter
+ * @mbox: mailbox to use for the FW command
+ * @cid: the context id
+ * @ctype: the context type
+ * @data: where to store the context data
+ *
+ * Issues a FW command through the given mailbox to read an SGE context.
+ */
+int t4_sge_ctxt_rd(struct adapter *adap, unsigned int mbox, unsigned int cid,
+		   enum ctxt_type ctype, u32 *data)
+{
+	struct fw_ldst_cmd c;
+	int ret;
+
+	if (ctype == CTXT_FLM)
+		ret = FW_LDST_ADDRSPC_SGE_FLMC;
+	else
+		ret = FW_LDST_ADDRSPC_SGE_CONMC;
+
+	memset(&c, 0, sizeof(c));
+	c.op_to_addrspace = cpu_to_be32(FW_CMD_OP_V(FW_LDST_CMD) |
+					FW_CMD_REQUEST_F | FW_CMD_READ_F |
+					FW_LDST_CMD_ADDRSPACE_V(ret));
+	c.cycles_to_len16 = cpu_to_be32(FW_LEN16(c));
+	c.u.idctxt.physid = cpu_to_be32(cid);
+
+	ret = t4_wr_mbox(adap, mbox, &c, sizeof(c), &c);
+	if (ret == 0) {
+		data[0] = be32_to_cpu(c.u.idctxt.ctxt_data0);
+		data[1] = be32_to_cpu(c.u.idctxt.ctxt_data1);
+		data[2] = be32_to_cpu(c.u.idctxt.ctxt_data2);
+		data[3] = be32_to_cpu(c.u.idctxt.ctxt_data3);
+		data[4] = be32_to_cpu(c.u.idctxt.ctxt_data4);
+		data[5] = be32_to_cpu(c.u.idctxt.ctxt_data5);
+	}
+	return ret;
+}
+
+/**
+ * t4_sge_ctxt_rd_bd - read an SGE context bypassing FW
+ * @adap: the adapter
+ * @cid: the context id
+ * @ctype: the context type
+ * @data: where to store the context data
+ *
+ * Reads an SGE context directly, bypassing FW.  This is only for
+ * debugging when FW is unavailable.
+ */
+int t4_sge_ctxt_rd_bd(struct adapter *adap, unsigned int cid,
+		      enum ctxt_type ctype, u32 *data)
+{
+	int i, ret;
+
+	t4_write_reg(adap, SGE_CTXT_CMD_A, CTXTQID_V(cid) | CTXTTYPE_V(ctype));
+	ret = t4_wait_op_done(adap, SGE_CTXT_CMD_A, BUSY_F, 0, 3, 1);
+	if (!ret)
+		for (i = SGE_CTXT_DATA0_A; i <= SGE_CTXT_DATA5_A; i += 4)
+			*data++ = t4_read_reg(adap, i);
+	return ret;
 }
 
 int t4_sched_params(struct adapter *adapter, int type, int level, int mode,

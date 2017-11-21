@@ -68,6 +68,22 @@ struct cudbg_entity_hdr *cudbg_get_entity_hdr(void *outbuf, int i)
 		(sizeof(struct cudbg_entity_hdr) * (i - 1)));
 }
 
+static int cudbg_read_vpd_reg(struct adapter *padap, u32 addr, u32 len,
+			      void *dest)
+{
+	int vaddr, rc;
+
+	vaddr = t4_eeprom_ptov(addr, padap->pf, EEPROMPFSIZE);
+	if (vaddr < 0)
+		return vaddr;
+
+	rc = pci_read_vpd(padap->pdev, vaddr, len, dest);
+	if (rc < 0)
+		return rc;
+
+	return 0;
+}
+
 int cudbg_collect_reg_dump(struct cudbg_init *pdbg_init,
 			   struct cudbg_buffer *dbg_buff,
 			   struct cudbg_error *cudbg_err)
@@ -1099,6 +1115,84 @@ int cudbg_collect_tid(struct cudbg_init *pdbg_init,
 	return rc;
 }
 
+int cudbg_dump_context_size(struct adapter *padap)
+{
+	u32 value, size;
+	u8 flq;
+
+	value = t4_read_reg(padap, SGE_FLM_CFG_A);
+
+	/* Get number of data freelist queues */
+	flq = HDRSTARTFLQ_G(value);
+	size = CUDBG_MAX_FL_QIDS >> flq;
+
+	/* Add extra space for congestion manager contexts.
+	 * The number of CONM contexts are same as number of freelist
+	 * queues.
+	 */
+	size += size;
+	return size * sizeof(struct cudbg_ch_cntxt);
+}
+
+static void cudbg_read_sge_ctxt(struct cudbg_init *pdbg_init, u32 cid,
+				enum ctxt_type ctype, u32 *data)
+{
+	struct adapter *padap = pdbg_init->adap;
+	int rc = -1;
+
+	/* Under heavy traffic, the SGE Queue contexts registers will be
+	 * frequently accessed by firmware.
+	 *
+	 * To avoid conflicts with firmware, always ask firmware to fetch
+	 * the SGE Queue contexts via mailbox. On failure, fallback to
+	 * accessing hardware registers directly.
+	 */
+	if (is_fw_attached(pdbg_init))
+		rc = t4_sge_ctxt_rd(padap, padap->mbox, cid, ctype, data);
+	if (rc)
+		t4_sge_ctxt_rd_bd(padap, cid, ctype, data);
+}
+
+int cudbg_collect_dump_context(struct cudbg_init *pdbg_init,
+			       struct cudbg_buffer *dbg_buff,
+			       struct cudbg_error *cudbg_err)
+{
+	struct adapter *padap = pdbg_init->adap;
+	struct cudbg_buffer temp_buff = { 0 };
+	struct cudbg_ch_cntxt *buff;
+	u32 size, i = 0;
+	int rc;
+
+	rc = cudbg_dump_context_size(padap);
+	if (rc <= 0)
+		return CUDBG_STATUS_ENTITY_NOT_FOUND;
+
+	size = rc;
+	rc = cudbg_get_buff(dbg_buff, size, &temp_buff);
+	if (rc)
+		return rc;
+
+	buff = (struct cudbg_ch_cntxt *)temp_buff.data;
+	while (size > 0) {
+		buff->cntxt_type = CTXT_FLM;
+		buff->cntxt_id = i;
+		cudbg_read_sge_ctxt(pdbg_init, i, CTXT_FLM, buff->data);
+		buff++;
+		size -= sizeof(struct cudbg_ch_cntxt);
+
+		buff->cntxt_type = CTXT_CNM;
+		buff->cntxt_id = i;
+		cudbg_read_sge_ctxt(pdbg_init, i, CTXT_CNM, buff->data);
+		buff++;
+		size -= sizeof(struct cudbg_ch_cntxt);
+
+		i++;
+	}
+
+	cudbg_write_and_release_buff(&temp_buff, dbg_buff);
+	return rc;
+}
+
 static inline void cudbg_tcamxy2valmask(u64 x, u64 y, u8 *addr, u64 *mask)
 {
 	*mask = x | y;
@@ -1289,8 +1383,47 @@ int cudbg_collect_vpd_data(struct cudbg_init *pdbg_init,
 {
 	struct adapter *padap = pdbg_init->adap;
 	struct cudbg_buffer temp_buff = { 0 };
+	char vpd_str[CUDBG_VPD_VER_LEN + 1];
+	u32 scfg_vers, vpd_vers, fw_vers;
 	struct cudbg_vpd_data *vpd_data;
-	int rc;
+	struct vpd_params vpd = { 0 };
+	int rc, ret;
+
+	rc = t4_get_raw_vpd_params(padap, &vpd);
+	if (rc)
+		return rc;
+
+	rc = t4_get_fw_version(padap, &fw_vers);
+	if (rc)
+		return rc;
+
+	/* Serial Configuration Version is located beyond the PF's vpd size.
+	 * Temporarily give access to entire EEPROM to get it.
+	 */
+	rc = pci_set_vpd_size(padap->pdev, EEPROMVSIZE);
+	if (rc < 0)
+		return rc;
+
+	ret = cudbg_read_vpd_reg(padap, CUDBG_SCFG_VER_ADDR, CUDBG_SCFG_VER_LEN,
+				 &scfg_vers);
+
+	/* Restore back to original PF's vpd size */
+	rc = pci_set_vpd_size(padap->pdev, CUDBG_VPD_PF_SIZE);
+	if (rc < 0)
+		return rc;
+
+	if (ret)
+		return ret;
+
+	rc = cudbg_read_vpd_reg(padap, CUDBG_VPD_VER_ADDR, CUDBG_VPD_VER_LEN,
+				vpd_str);
+	if (rc)
+		return rc;
+
+	vpd_str[CUDBG_VPD_VER_LEN] = '\0';
+	rc = kstrtouint(vpd_str, 0, &vpd_vers);
+	if (rc)
+		return rc;
 
 	rc = cudbg_get_buff(dbg_buff, sizeof(struct cudbg_vpd_data),
 			    &temp_buff);
@@ -1298,16 +1431,191 @@ int cudbg_collect_vpd_data(struct cudbg_init *pdbg_init,
 		return rc;
 
 	vpd_data = (struct cudbg_vpd_data *)temp_buff.data;
-	memcpy(vpd_data->sn, padap->params.vpd.sn, SERNUM_LEN + 1);
-	memcpy(vpd_data->bn, padap->params.vpd.pn, PN_LEN + 1);
-	memcpy(vpd_data->na, padap->params.vpd.na, MACADDR_LEN + 1);
-	memcpy(vpd_data->mn, padap->params.vpd.id, ID_LEN + 1);
-	vpd_data->scfg_vers = padap->params.scfg_vers;
-	vpd_data->vpd_vers = padap->params.vpd_vers;
-	vpd_data->fw_major = FW_HDR_FW_VER_MAJOR_G(padap->params.fw_vers);
-	vpd_data->fw_minor = FW_HDR_FW_VER_MINOR_G(padap->params.fw_vers);
-	vpd_data->fw_micro = FW_HDR_FW_VER_MICRO_G(padap->params.fw_vers);
-	vpd_data->fw_build = FW_HDR_FW_VER_BUILD_G(padap->params.fw_vers);
+	memcpy(vpd_data->sn, vpd.sn, SERNUM_LEN + 1);
+	memcpy(vpd_data->bn, vpd.pn, PN_LEN + 1);
+	memcpy(vpd_data->na, vpd.na, MACADDR_LEN + 1);
+	memcpy(vpd_data->mn, vpd.id, ID_LEN + 1);
+	vpd_data->scfg_vers = scfg_vers;
+	vpd_data->vpd_vers = vpd_vers;
+	vpd_data->fw_major = FW_HDR_FW_VER_MAJOR_G(fw_vers);
+	vpd_data->fw_minor = FW_HDR_FW_VER_MINOR_G(fw_vers);
+	vpd_data->fw_micro = FW_HDR_FW_VER_MICRO_G(fw_vers);
+	vpd_data->fw_build = FW_HDR_FW_VER_BUILD_G(fw_vers);
+	cudbg_write_and_release_buff(&temp_buff, dbg_buff);
+	return rc;
+}
+
+static int cudbg_read_tid(struct cudbg_init *pdbg_init, u32 tid,
+			  struct cudbg_tid_data *tid_data)
+{
+	struct adapter *padap = pdbg_init->adap;
+	int i, cmd_retry = 8;
+	u32 val;
+
+	/* Fill REQ_DATA regs with 0's */
+	for (i = 0; i < NUM_LE_DB_DBGI_REQ_DATA_INSTANCES; i++)
+		t4_write_reg(padap, LE_DB_DBGI_REQ_DATA_A + (i << 2), 0);
+
+	/* Write DBIG command */
+	val = DBGICMD_V(4) | DBGITID_V(tid);
+	t4_write_reg(padap, LE_DB_DBGI_REQ_TCAM_CMD_A, val);
+	tid_data->dbig_cmd = val;
+
+	val = DBGICMDSTRT_F | DBGICMDMODE_V(1); /* LE mode */
+	t4_write_reg(padap, LE_DB_DBGI_CONFIG_A, val);
+	tid_data->dbig_conf = val;
+
+	/* Poll the DBGICMDBUSY bit */
+	val = 1;
+	while (val) {
+		val = t4_read_reg(padap, LE_DB_DBGI_CONFIG_A);
+		val = val & DBGICMDBUSY_F;
+		cmd_retry--;
+		if (!cmd_retry)
+			return CUDBG_SYSTEM_ERROR;
+	}
+
+	/* Check RESP status */
+	val = t4_read_reg(padap, LE_DB_DBGI_RSP_STATUS_A);
+	tid_data->dbig_rsp_stat = val;
+	if (!(val & 1))
+		return CUDBG_SYSTEM_ERROR;
+
+	/* Read RESP data */
+	for (i = 0; i < NUM_LE_DB_DBGI_RSP_DATA_INSTANCES; i++)
+		tid_data->data[i] = t4_read_reg(padap,
+						LE_DB_DBGI_RSP_DATA_A +
+						(i << 2));
+	tid_data->tid = tid;
+	return 0;
+}
+
+static int cudbg_get_le_type(u32 tid, struct cudbg_tcam tcam_region)
+{
+	int type = LE_ET_UNKNOWN;
+
+	if (tid < tcam_region.server_start)
+		type = LE_ET_TCAM_CON;
+	else if (tid < tcam_region.filter_start)
+		type = LE_ET_TCAM_SERVER;
+	else if (tid < tcam_region.clip_start)
+		type = LE_ET_TCAM_FILTER;
+	else if (tid < tcam_region.routing_start)
+		type = LE_ET_TCAM_CLIP;
+	else if (tid < tcam_region.tid_hash_base)
+		type = LE_ET_TCAM_ROUTING;
+	else if (tid < tcam_region.max_tid)
+		type = LE_ET_HASH_CON;
+	else
+		type = LE_ET_INVALID_TID;
+
+	return type;
+}
+
+static int cudbg_is_ipv6_entry(struct cudbg_tid_data *tid_data,
+			       struct cudbg_tcam tcam_region)
+{
+	int ipv6 = 0;
+	int le_type;
+
+	le_type = cudbg_get_le_type(tid_data->tid, tcam_region);
+	if (tid_data->tid & 1)
+		return 0;
+
+	if (le_type == LE_ET_HASH_CON) {
+		ipv6 = tid_data->data[16] & 0x8000;
+	} else if (le_type == LE_ET_TCAM_CON) {
+		ipv6 = tid_data->data[16] & 0x8000;
+		if (ipv6)
+			ipv6 = tid_data->data[9] == 0x00C00000;
+	} else {
+		ipv6 = 0;
+	}
+	return ipv6;
+}
+
+void cudbg_fill_le_tcam_info(struct adapter *padap,
+			     struct cudbg_tcam *tcam_region)
+{
+	u32 value;
+
+	/* Get the LE regions */
+	value = t4_read_reg(padap, LE_DB_TID_HASHBASE_A); /* hash base index */
+	tcam_region->tid_hash_base = value;
+
+	/* Get routing table index */
+	value = t4_read_reg(padap, LE_DB_ROUTING_TABLE_INDEX_A);
+	tcam_region->routing_start = value;
+
+	/*Get clip table index */
+	value = t4_read_reg(padap, LE_DB_CLIP_TABLE_INDEX_A);
+	tcam_region->clip_start = value;
+
+	/* Get filter table index */
+	value = t4_read_reg(padap, LE_DB_FILTER_TABLE_INDEX_A);
+	tcam_region->filter_start = value;
+
+	/* Get server table index */
+	value = t4_read_reg(padap, LE_DB_SERVER_INDEX_A);
+	tcam_region->server_start = value;
+
+	/* Check whether hash is enabled and calculate the max tids */
+	value = t4_read_reg(padap, LE_DB_CONFIG_A);
+	if ((value >> HASHEN_S) & 1) {
+		value = t4_read_reg(padap, LE_DB_HASH_CONFIG_A);
+		if (CHELSIO_CHIP_VERSION(padap->params.chip) > CHELSIO_T5) {
+			tcam_region->max_tid = (value & 0xFFFFF) +
+					       tcam_region->tid_hash_base;
+		} else {
+			value = HASHTIDSIZE_G(value);
+			value = 1 << value;
+			tcam_region->max_tid = value +
+					       tcam_region->tid_hash_base;
+		}
+	} else { /* hash not enabled */
+		tcam_region->max_tid = CUDBG_MAX_TCAM_TID;
+	}
+}
+
+int cudbg_collect_le_tcam(struct cudbg_init *pdbg_init,
+			  struct cudbg_buffer *dbg_buff,
+			  struct cudbg_error *cudbg_err)
+{
+	struct adapter *padap = pdbg_init->adap;
+	struct cudbg_buffer temp_buff = { 0 };
+	struct cudbg_tcam tcam_region = { 0 };
+	struct cudbg_tid_data *tid_data;
+	u32 bytes = 0;
+	int rc, size;
+	u32 i;
+
+	cudbg_fill_le_tcam_info(padap, &tcam_region);
+
+	size = sizeof(struct cudbg_tid_data) * tcam_region.max_tid;
+	size += sizeof(struct cudbg_tcam);
+	rc = cudbg_get_buff(dbg_buff, size, &temp_buff);
+	if (rc)
+		return rc;
+
+	memcpy(temp_buff.data, &tcam_region, sizeof(struct cudbg_tcam));
+	bytes = sizeof(struct cudbg_tcam);
+	tid_data = (struct cudbg_tid_data *)(temp_buff.data + bytes);
+	/* read all tid */
+	for (i = 0; i < tcam_region.max_tid; ) {
+		rc = cudbg_read_tid(pdbg_init, i, tid_data);
+		if (rc) {
+			cudbg_err->sys_err = rc;
+			cudbg_put_buff(&temp_buff, dbg_buff);
+			return rc;
+		}
+
+		/* ipv6 takes two tids */
+		cudbg_is_ipv6_entry(tid_data, tcam_region) ? i += 2 : i++;
+
+		tid_data++;
+		bytes += sizeof(struct cudbg_tid_data);
+	}
+
 	cudbg_write_and_release_buff(&temp_buff, dbg_buff);
 	return rc;
 }

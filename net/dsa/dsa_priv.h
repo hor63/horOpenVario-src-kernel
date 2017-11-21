@@ -147,10 +147,10 @@ int dsa_port_fdb_add(struct dsa_port *dp, const unsigned char *addr,
 int dsa_port_fdb_del(struct dsa_port *dp, const unsigned char *addr,
 		     u16 vid);
 int dsa_port_fdb_dump(struct dsa_port *dp, dsa_fdb_dump_cb_t *cb, void *data);
-int dsa_port_mdb_add(struct dsa_port *dp,
+int dsa_port_mdb_add(const struct dsa_port *dp,
 		     const struct switchdev_obj_port_mdb *mdb,
 		     struct switchdev_trans *trans);
-int dsa_port_mdb_del(struct dsa_port *dp,
+int dsa_port_mdb_del(const struct dsa_port *dp,
 		     const struct switchdev_obj_port_mdb *mdb);
 int dsa_port_vlan_add(struct dsa_port *dp,
 		      const struct switchdev_obj_port_vlan *vlan,
@@ -191,6 +191,7 @@ void dsa_switch_unregister_notifier(struct dsa_switch *ds);
 
 /* tag_brcm.c */
 extern const struct dsa_device_ops brcm_netdev_ops;
+extern const struct dsa_device_ops brcm_prepend_netdev_ops;
 
 /* tag_dsa.c */
 extern const struct dsa_device_ops dsa_netdev_ops;

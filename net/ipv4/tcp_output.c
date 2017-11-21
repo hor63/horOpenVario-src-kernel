@@ -220,7 +220,7 @@ void tcp_select_initial_window(const struct sock *sk, int __space, __u32 mss,
 	(*rcv_wscale) = 0;
 	if (wscale_ok) {
 		/* Set window scaling on max possible window */
-		space = max_t(u32, space, sysctl_tcp_rmem[2]);
+		space = max_t(u32, space, sock_net(sk)->ipv4.sysctl_tcp_rmem[2]);
 		space = max_t(u32, space, sysctl_rmem_max);
 		space = min_t(u32, space, *window_clamp);
 		while (space > U16_MAX && (*rcv_wscale) < TCP_MAX_WSCALE) {
@@ -1218,21 +1218,6 @@ static void tcp_set_skb_tso_segs(struct sk_buff *skb, unsigned int mss_now)
 	}
 }
 
-/* When a modification to fackets out becomes necessary, we need to check
- * skb is counted to fackets_out or not.
- */
-static void tcp_adjust_fackets_out(struct sock *sk, const struct sk_buff *skb,
-				   int decr)
-{
-	struct tcp_sock *tp = tcp_sk(sk);
-
-	if (!tp->sacked_out || tcp_is_reno(tp))
-		return;
-
-	if (after(tcp_highest_sack_seq(tp), TCP_SKB_CB(skb)->seq))
-		tp->fackets_out -= decr;
-}
-
 /* Pcount in the middle of the write queue got changed, we need to do various
  * tweaks to fix counters
  */
@@ -1253,11 +1238,9 @@ static void tcp_adjust_pcount(struct sock *sk, const struct sk_buff *skb, int de
 	if (tcp_is_reno(tp) && decr > 0)
 		tp->sacked_out -= min_t(u32, tp->sacked_out, decr);
 
-	tcp_adjust_fackets_out(sk, skb, decr);
-
 	if (tp->lost_skb_hint &&
 	    before(TCP_SKB_CB(skb)->seq, TCP_SKB_CB(tp->lost_skb_hint)->seq) &&
-	    (tcp_is_fack(tp) || (TCP_SKB_CB(skb)->sacked & TCPCB_SACKED_ACKED)))
+	    (TCP_SKB_CB(skb)->sacked & TCPCB_SACKED_ACKED))
 		tp->lost_cnt_hint -= decr;
 
 	tcp_verify_left_out(tp);
@@ -1737,7 +1720,7 @@ u32 tcp_tso_autosize(const struct sock *sk, unsigned int mss_now,
 {
 	u32 bytes, segs;
 
-	bytes = min(sk->sk_pacing_rate >> 10,
+	bytes = min(sk->sk_pacing_rate >> sk->sk_pacing_shift,
 		    sk->sk_gso_max_size - 1 - MAX_TCP_HEADER);
 
 	/* Goal is to send at least one packet per ms,
@@ -1978,7 +1961,7 @@ static bool tcp_tso_should_defer(struct sock *sk, struct sk_buff *skb,
 	if ((skb != tcp_write_queue_tail(sk)) && (limit >= skb->len))
 		goto send_now;
 
-	win_divisor = ACCESS_ONCE(sock_net(sk)->ipv4.sysctl_tcp_tso_win_divisor);
+	win_divisor = READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_tso_win_divisor);
 	if (win_divisor) {
 		u32 chunk = min(tp->snd_wnd, tp->snd_cwnd * tp->mss_cache);
 
@@ -2215,7 +2198,7 @@ static bool tcp_small_queue_check(struct sock *sk, const struct sk_buff *skb,
 {
 	unsigned int limit;
 
-	limit = max(2 * skb->truesize, sk->sk_pacing_rate >> 10);
+	limit = max(2 * skb->truesize, sk->sk_pacing_rate >> sk->sk_pacing_shift);
 	limit = min_t(u32, limit,
 		      sock_net(sk)->ipv4.sysctl_tcp_limit_output_bytes);
 	limit <<= factor;
@@ -2961,9 +2944,6 @@ int tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb, int segs)
  * retransmitted data is acknowledged.  It tries to continue
  * resending the rest of the retransmit queue, until either
  * we've sent it all or the congestion window limit is reached.
- * If doing SACK, the first ACK which comes back for a timeout
- * based retransmit packet might feed us FACK information again.
- * If so, we use it to avoid unnecessarily retransmissions.
  */
 void tcp_xmit_retransmit_queue(struct sock *sk)
 {

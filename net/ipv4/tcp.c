@@ -289,12 +289,7 @@ struct percpu_counter tcp_orphan_count;
 EXPORT_SYMBOL_GPL(tcp_orphan_count);
 
 long sysctl_tcp_mem[3] __read_mostly;
-int sysctl_tcp_wmem[3] __read_mostly;
-int sysctl_tcp_rmem[3] __read_mostly;
-
 EXPORT_SYMBOL(sysctl_tcp_mem);
-EXPORT_SYMBOL(sysctl_tcp_rmem);
-EXPORT_SYMBOL(sysctl_tcp_wmem);
 
 atomic_long_t tcp_memory_allocated;	/* Current allocated memory. */
 EXPORT_SYMBOL(tcp_memory_allocated);
@@ -456,8 +451,8 @@ void tcp_init_sock(struct sock *sk)
 
 	icsk->icsk_sync_mss = tcp_sync_mss;
 
-	sk->sk_sndbuf = sysctl_tcp_wmem[1];
-	sk->sk_rcvbuf = sysctl_tcp_rmem[1];
+	sk->sk_sndbuf = sock_net(sk)->ipv4.sysctl_tcp_wmem[1];
+	sk->sk_rcvbuf = sock_net(sk)->ipv4.sysctl_tcp_rmem[1];
 
 	sk_sockets_allocated_inc(sk);
 }
@@ -2514,8 +2509,6 @@ static int tcp_repair_options_est(struct sock *sk,
 				return -EINVAL;
 
 			tp->rx_opt.sack_ok |= TCP_SACK_SEEN;
-			if (sock_net(sk)->ipv4.sysctl_tcp_fack)
-				tcp_enable_fack(tp);
 			break;
 		case TCPOPT_TIMESTAMP:
 			if (opt.opt_val != 0)
@@ -2984,7 +2977,6 @@ void tcp_get_info(struct sock *sk, struct tcp_info *info)
 
 	info->tcpi_lost = tp->lost_out;
 	info->tcpi_retrans = tp->retrans_out;
-	info->tcpi_fackets = tp->fackets_out;
 
 	now = tcp_jiffies32;
 	info->tcpi_last_data_sent = jiffies_to_msecs(now - tp->lsndtime);
@@ -3636,13 +3628,13 @@ void __init tcp_init(void)
 	max_wshare = min(4UL*1024*1024, limit);
 	max_rshare = min(6UL*1024*1024, limit);
 
-	sysctl_tcp_wmem[0] = SK_MEM_QUANTUM;
-	sysctl_tcp_wmem[1] = 16*1024;
-	sysctl_tcp_wmem[2] = max(64*1024, max_wshare);
+	init_net.ipv4.sysctl_tcp_wmem[0] = SK_MEM_QUANTUM;
+	init_net.ipv4.sysctl_tcp_wmem[1] = 16*1024;
+	init_net.ipv4.sysctl_tcp_wmem[2] = max(64*1024, max_wshare);
 
-	sysctl_tcp_rmem[0] = SK_MEM_QUANTUM;
-	sysctl_tcp_rmem[1] = 87380;
-	sysctl_tcp_rmem[2] = max(87380, max_rshare);
+	init_net.ipv4.sysctl_tcp_rmem[0] = SK_MEM_QUANTUM;
+	init_net.ipv4.sysctl_tcp_rmem[1] = 87380;
+	init_net.ipv4.sysctl_tcp_rmem[2] = max(87380, max_rshare);
 
 	pr_info("Hash tables configured (established %u bind %u)\n",
 		tcp_hashinfo.ehash_mask + 1, tcp_hashinfo.bhash_size);

@@ -17,7 +17,7 @@
 
 #include "dsa_priv.h"
 
-static int dsa_port_notify(struct dsa_port *dp, unsigned long e, void *v)
+static int dsa_port_notify(const struct dsa_port *dp, unsigned long e, void *v)
 {
 	struct raw_notifier_head *nh = &dp->ds->dst->nh;
 	int err;
@@ -215,7 +215,7 @@ int dsa_port_fdb_dump(struct dsa_port *dp, dsa_fdb_dump_cb_t *cb, void *data)
 	return ds->ops->port_fdb_dump(ds, port, cb, data);
 }
 
-int dsa_port_mdb_add(struct dsa_port *dp,
+int dsa_port_mdb_add(const struct dsa_port *dp,
 		     const struct switchdev_obj_port_mdb *mdb,
 		     struct switchdev_trans *trans)
 {
@@ -229,7 +229,7 @@ int dsa_port_mdb_add(struct dsa_port *dp,
 	return dsa_port_notify(dp, DSA_NOTIFIER_MDB_ADD, &info);
 }
 
-int dsa_port_mdb_del(struct dsa_port *dp,
+int dsa_port_mdb_del(const struct dsa_port *dp,
 		     const struct switchdev_obj_port_mdb *mdb)
 {
 	struct dsa_notifier_mdb_info info = {
@@ -252,7 +252,10 @@ int dsa_port_vlan_add(struct dsa_port *dp,
 		.vlan = vlan,
 	};
 
-	return dsa_port_notify(dp, DSA_NOTIFIER_VLAN_ADD, &info);
+	if (br_vlan_enabled(dp->bridge_dev))
+		return dsa_port_notify(dp, DSA_NOTIFIER_VLAN_ADD, &info);
+
+	return 0;
 }
 
 int dsa_port_vlan_del(struct dsa_port *dp,
@@ -264,7 +267,10 @@ int dsa_port_vlan_del(struct dsa_port *dp,
 		.vlan = vlan,
 	};
 
-	return dsa_port_notify(dp, DSA_NOTIFIER_VLAN_DEL, &info);
+	if (br_vlan_enabled(dp->bridge_dev))
+		return dsa_port_notify(dp, DSA_NOTIFIER_VLAN_DEL, &info);
+
+	return 0;
 }
 
 int dsa_port_fixed_link_register_of(struct dsa_port *dp)

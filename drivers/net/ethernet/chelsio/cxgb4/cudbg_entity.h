@@ -145,6 +145,14 @@ struct cudbg_tid_info_region_rev1 {
 	u32 reserved[16];
 };
 
+#define CUDBG_MAX_FL_QIDS 1024
+
+struct cudbg_ch_cntxt {
+	u32 cntxt_type;
+	u32 cntxt_id;
+	u32 data[SGE_CTXT_SIZE / 4];
+};
+
 #define CUDBG_MAX_RPLC_SIZE 128
 
 struct cudbg_mps_tcam {
@@ -166,6 +174,12 @@ struct cudbg_mps_tcam {
 	u8 reserved[2];
 };
 
+#define CUDBG_VPD_PF_SIZE 0x800
+#define CUDBG_SCFG_VER_ADDR 0x06
+#define CUDBG_SCFG_VER_LEN 4
+#define CUDBG_VPD_VER_ADDR 0x18c7
+#define CUDBG_VPD_VER_LEN 2
+
 struct cudbg_vpd_data {
 	u8 sn[SERNUM_LEN + 1];
 	u8 bn[PN_LEN + 1];
@@ -177,6 +191,36 @@ struct cudbg_vpd_data {
 	u16 fw_build;
 	u32 scfg_vers;
 	u32 vpd_vers;
+};
+
+#define CUDBG_MAX_TCAM_TID 0x800
+
+enum cudbg_le_entry_types {
+	LE_ET_UNKNOWN = 0,
+	LE_ET_TCAM_CON = 1,
+	LE_ET_TCAM_SERVER = 2,
+	LE_ET_TCAM_FILTER = 3,
+	LE_ET_TCAM_CLIP = 4,
+	LE_ET_TCAM_ROUTING = 5,
+	LE_ET_HASH_CON = 6,
+	LE_ET_INVALID_TID = 8,
+};
+
+struct cudbg_tcam {
+	u32 filter_start;
+	u32 server_start;
+	u32 clip_start;
+	u32 routing_start;
+	u32 tid_hash_base;
+	u32 max_tid;
+};
+
+struct cudbg_tid_data {
+	u32 tid;
+	u32 dbig_cmd;
+	u32 dbig_conf;
+	u32 dbig_rsp_stat;
+	u32 data[NUM_LE_DB_DBGI_RSP_DATA_INSTANCES];
 };
 
 #define CUDBG_NUM_ULPTX 11

@@ -242,8 +242,6 @@ void tcp_time_wait(struct sock *sk, int state, int timeo);
 /* sysctl variables for tcp */
 extern int sysctl_tcp_max_orphans;
 extern long sysctl_tcp_mem[3];
-extern int sysctl_tcp_wmem[3];
-extern int sysctl_tcp_rmem[3];
 
 #define TCP_RACK_LOSS_DETECTION  0x1 /* Use RACK to detect losses */
 #define TCP_RACK_STATIC_REO_WND  0x2 /* Use static RACK reo wnd */
@@ -386,7 +384,6 @@ void tcp_update_metrics(struct sock *sk);
 void tcp_init_metrics(struct sock *sk);
 void tcp_metrics_init(void);
 bool tcp_peer_is_proven(struct request_sock *req, struct dst_entry *dst);
-void tcp_disable_fack(struct tcp_sock *tp);
 void tcp_close(struct sock *sk, long timeout);
 void tcp_init_sock(struct sock *sk);
 void tcp_init_transfer(struct sock *sk, int bpf_op);
@@ -778,7 +775,7 @@ struct tcp_skb_cb {
 	};
 	__u8		tcp_flags;	/* TCP header flags. (tcp[13])	*/
 
-	__u8		sacked;		/* State flags for SACK/FACK.	*/
+	__u8		sacked;		/* State flags for SACK.	*/
 #define TCPCB_SACKED_ACKED	0x01	/* SKB ACK'd by a SACK block	*/
 #define TCPCB_SACKED_RETRANS	0x02	/* SKB retransmitted		*/
 #define TCPCB_LOST		0x04	/* SKB is lost			*/
@@ -1005,8 +1002,8 @@ void tcp_unregister_congestion_control(struct tcp_congestion_ops *type);
 void tcp_assign_congestion_control(struct sock *sk);
 void tcp_init_congestion_control(struct sock *sk);
 void tcp_cleanup_congestion_control(struct sock *sk);
-int tcp_set_default_congestion_control(const char *name);
-void tcp_get_default_congestion_control(char *name);
+int tcp_set_default_congestion_control(struct net *net, const char *name);
+void tcp_get_default_congestion_control(struct net *net, char *name);
 void tcp_get_available_congestion_control(char *buf, size_t len);
 void tcp_get_allowed_congestion_control(char *buf, size_t len);
 int tcp_set_allowed_congestion_control(char *allowed);
@@ -1020,7 +1017,7 @@ void tcp_reno_cong_avoid(struct sock *sk, u32 ack, u32 acked);
 extern struct tcp_congestion_ops tcp_reno;
 
 struct tcp_congestion_ops *tcp_ca_find_key(u32 key);
-u32 tcp_ca_get_key_by_name(const char *name, bool *ecn_ca);
+u32 tcp_ca_get_key_by_name(struct net *net, const char *name, bool *ecn_ca);
 #ifdef CONFIG_INET
 char *tcp_ca_get_name_by_key(u32 key, char *buffer);
 #else
@@ -1068,7 +1065,6 @@ void tcp_rate_check_app_limited(struct sock *sk);
  *
  * tcp_is_sack - SACK enabled
  * tcp_is_reno - No SACK
- * tcp_is_fack - FACK enabled, implies SACK enabled
  */
 static inline int tcp_is_sack(const struct tcp_sock *tp)
 {
@@ -1078,16 +1074,6 @@ static inline int tcp_is_sack(const struct tcp_sock *tp)
 static inline bool tcp_is_reno(const struct tcp_sock *tp)
 {
 	return !tcp_is_sack(tp);
-}
-
-static inline bool tcp_is_fack(const struct tcp_sock *tp)
-{
-	return tp->rx_opt.sack_ok & TCP_FACK_ENABLED;
-}
-
-static inline void tcp_enable_fack(struct tcp_sock *tp)
-{
-	tp->rx_opt.sack_ok |= TCP_FACK_ENABLED;
 }
 
 static inline unsigned int tcp_left_out(const struct tcp_sock *tp)
@@ -1644,9 +1630,6 @@ static inline void tcp_check_send_head(struct sock *sk, struct sk_buff *skb_unli
 {
 	if (tcp_write_queue_empty(sk))
 		tcp_chrono_stop(sk, TCP_CHRONO_BUSY);
-
-	if (tcp_sk(sk)->highest_sack == skb_unlinked)
-		tcp_sk(sk)->highest_sack = NULL;
 }
 
 static inline void __tcp_add_write_queue_tail(struct sock *sk, struct sk_buff *skb)
@@ -1659,12 +1642,8 @@ static inline void tcp_add_write_queue_tail(struct sock *sk, struct sk_buff *skb
 	__tcp_add_write_queue_tail(sk, skb);
 
 	/* Queue it, remembering where we must start sending. */
-	if (sk->sk_write_queue.next == skb) {
+	if (sk->sk_write_queue.next == skb)
 		tcp_chrono_start(sk, TCP_CHRONO_BUSY);
-
-		if (tcp_sk(sk)->highest_sack == NULL)
-			tcp_sk(sk)->highest_sack = skb;
-	}
 }
 
 /* Insert new before skb on the write queue of sk.  */
@@ -1722,9 +1701,7 @@ static inline u32 tcp_highest_sack_seq(struct tcp_sock *tp)
 
 static inline void tcp_advance_highest_sack(struct sock *sk, struct sk_buff *skb)
 {
-	struct sk_buff *next = skb_rb_next(skb);
-
-	tcp_sk(sk)->highest_sack = next ?: tcp_send_head(sk);
+	tcp_sk(sk)->highest_sack = skb_rb_next(skb);
 }
 
 static inline struct sk_buff *tcp_highest_sack(struct sock *sk)
@@ -1734,9 +1711,7 @@ static inline struct sk_buff *tcp_highest_sack(struct sock *sk)
 
 static inline void tcp_highest_sack_reset(struct sock *sk)
 {
-	struct sk_buff *skb = tcp_rtx_queue_head(sk);
-
-	tcp_sk(sk)->highest_sack = skb ?: tcp_send_head(sk);
+	tcp_sk(sk)->highest_sack = tcp_rtx_queue_head(sk);
 }
 
 /* Called when old skb is about to be deleted and replaced by new skb */

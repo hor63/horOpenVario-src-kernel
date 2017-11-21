@@ -860,6 +860,7 @@ disable_outputs(struct drm_device *dev, struct drm_atomic_state *old_state)
 
 	for_each_oldnew_crtc_in_state(old_state, crtc, old_crtc_state, new_crtc_state, i) {
 		const struct drm_crtc_helper_funcs *funcs;
+		int ret;
 
 		/* Shut down everything that needs a full modeset. */
 		if (!drm_atomic_crtc_needs_modeset(new_crtc_state))
@@ -883,6 +884,14 @@ disable_outputs(struct drm_device *dev, struct drm_atomic_state *old_state)
 			funcs->disable(crtc);
 		else
 			funcs->dpms(crtc, DRM_MODE_DPMS_OFF);
+
+		if (!(dev->irq_enabled && dev->num_crtcs))
+			continue;
+
+		ret = drm_crtc_vblank_get(crtc);
+		WARN_ONCE(ret != -EINVAL, "driver forgot to call drm_crtc_vblank_off()\n");
+		if (ret == 0)
+			drm_crtc_vblank_put(crtc);
 	}
 }
 
@@ -3206,7 +3215,7 @@ struct drm_encoder *
 drm_atomic_helper_best_encoder(struct drm_connector *connector)
 {
 	WARN_ON(connector->encoder_ids[1]);
-	return drm_encoder_find(connector->dev, connector->encoder_ids[0]);
+	return drm_encoder_find(connector->dev, NULL, connector->encoder_ids[0]);
 }
 EXPORT_SYMBOL(drm_atomic_helper_best_encoder);
 

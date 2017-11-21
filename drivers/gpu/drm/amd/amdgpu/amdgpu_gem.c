@@ -212,7 +212,9 @@ int amdgpu_gem_create_ioctl(struct drm_device *dev, void *data,
 		      AMDGPU_GEM_CREATE_NO_CPU_ACCESS |
 		      AMDGPU_GEM_CREATE_CPU_GTT_USWC |
 		      AMDGPU_GEM_CREATE_VRAM_CLEARED |
-		      AMDGPU_GEM_CREATE_VM_ALWAYS_VALID))
+		      AMDGPU_GEM_CREATE_VM_ALWAYS_VALID |
+		      AMDGPU_GEM_CREATE_EXPLICIT_SYNC))
+
 		return -EINVAL;
 
 	/* reject invalid gem domains */
@@ -344,7 +346,7 @@ int amdgpu_gem_userptr_ioctl(struct drm_device *dev, void *data,
 	return 0;
 
 free_pages:
-	release_pages(bo->tbo.ttm->pages, bo->tbo.ttm->num_pages, false);
+	release_pages(bo->tbo.ttm->pages, bo->tbo.ttm->num_pages);
 
 unlock_mmap_sem:
 	up_read(&current->mm->mmap_sem);
@@ -577,11 +579,6 @@ int amdgpu_gem_va_ioctl(struct drm_device *dev, void *data,
 			args->operation);
 		return -EINVAL;
 	}
-	if ((args->operation == AMDGPU_VA_OP_MAP) ||
-	    (args->operation == AMDGPU_VA_OP_REPLACE)) {
-		if (amdgpu_kms_vram_lost(adev, fpriv))
-			return -ENODEV;
-	}
 
 	INIT_LIST_HEAD(&list);
 	INIT_LIST_HEAD(&duplicates);
@@ -789,11 +786,11 @@ static int amdgpu_debugfs_gem_bo_info(int id, void *ptr, void *data)
 	seq_printf(m, "\t0x%08x: %12ld byte %s",
 		   id, amdgpu_bo_size(bo), placement);
 
-	offset = ACCESS_ONCE(bo->tbo.mem.start);
+	offset = READ_ONCE(bo->tbo.mem.start);
 	if (offset != AMDGPU_BO_INVALID_OFFSET)
 		seq_printf(m, " @ 0x%010Lx", offset);
 
-	pin_count = ACCESS_ONCE(bo->pin_count);
+	pin_count = READ_ONCE(bo->pin_count);
 	if (pin_count)
 		seq_printf(m, " pin count %d", pin_count);
 	seq_printf(m, "\n");

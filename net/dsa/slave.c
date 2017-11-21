@@ -304,6 +304,13 @@ static int dsa_slave_port_obj_add(struct net_device *dev,
 	case SWITCHDEV_OBJ_ID_PORT_MDB:
 		err = dsa_port_mdb_add(dp, SWITCHDEV_OBJ_PORT_MDB(obj), trans);
 		break;
+	case SWITCHDEV_OBJ_ID_HOST_MDB:
+		/* DSA can directly translate this to a normal MDB add,
+		 * but on the CPU port.
+		 */
+		err = dsa_port_mdb_add(dp->cpu_dp, SWITCHDEV_OBJ_PORT_MDB(obj),
+				       trans);
+		break;
 	case SWITCHDEV_OBJ_ID_PORT_VLAN:
 		err = dsa_port_vlan_add(dp, SWITCHDEV_OBJ_PORT_VLAN(obj),
 					trans);
@@ -326,6 +333,12 @@ static int dsa_slave_port_obj_del(struct net_device *dev,
 	case SWITCHDEV_OBJ_ID_PORT_MDB:
 		err = dsa_port_mdb_del(dp, SWITCHDEV_OBJ_PORT_MDB(obj));
 		break;
+	case SWITCHDEV_OBJ_ID_HOST_MDB:
+		/* DSA can directly translate this to a normal MDB add,
+		 * but on the CPU port.
+		 */
+		err = dsa_port_mdb_del(dp->cpu_dp, SWITCHDEV_OBJ_PORT_MDB(obj));
+		break;
 	case SWITCHDEV_OBJ_ID_PORT_VLAN:
 		err = dsa_port_vlan_del(dp, SWITCHDEV_OBJ_PORT_VLAN(obj));
 		break;
@@ -342,11 +355,12 @@ static int dsa_slave_port_attr_get(struct net_device *dev,
 {
 	struct dsa_port *dp = dsa_slave_to_port(dev);
 	struct dsa_switch *ds = dp->ds;
+	struct dsa_switch_tree *dst = ds->dst;
 
 	switch (attr->id) {
 	case SWITCHDEV_ATTR_ID_PORT_PARENT_ID:
-		attr->u.ppid.id_len = sizeof(ds->index);
-		memcpy(&attr->u.ppid.id, &ds->index, attr->u.ppid.id_len);
+		attr->u.ppid.id_len = sizeof(dst->index);
+		memcpy(&attr->u.ppid.id, &dst->index, attr->u.ppid.id_len);
 		break;
 	case SWITCHDEV_ATTR_ID_PORT_BRIDGE_FLAGS_SUPPORT:
 		attr->u.brport_flags_support = 0;
