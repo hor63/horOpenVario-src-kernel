@@ -33,7 +33,7 @@
  *     included in all copies or substantial portions of the Software.
  *
  *     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- *     EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+ *     EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTI ES
  *     OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
  *     NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
  *     HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
@@ -54,11 +54,11 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 		ranges;
-
-		de-mali-shm: cma {
+                
+                de_mali_shm: mali_memory {
 			compatible = "shared-dma-pool";
 			size = <0x8000000>;
-			reusable;
+			/* reusable; */
 		};
 	};
 };
@@ -104,7 +104,7 @@
 	mali: gpu@1c40000 {
 		compatible = "allwinner,sun7i-a20-mali", "arm,mali-400";
 		reg = <0x01c40000 0x10000>;
-		memory-region = <&de-mali-shm>;
+		memory-region = <&de_mali_shm>;
                 
 		interrupts = <GIC_SPI 69 IRQ_TYPE_LEVEL_HIGH>,
 			     <GIC_SPI 70 IRQ_TYPE_LEVEL_HIGH>,
@@ -146,7 +146,7 @@
 
 &de {
 	status = "okay";
-	memory-region = <&de-mali-shm>;
+	memory-region = <&de_mali_shm>;
 
 };
 
