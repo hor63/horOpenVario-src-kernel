@@ -55,10 +55,11 @@
 		#size-cells = <1>;
 		ranges;
                 
-                de_mali_shm: mali_memory {
+                de_mali_shm: disp_memory {
 			compatible = "shared-dma-pool";
 			size = <0x8000000>;
-			/* reusable; */
+			alignment = <0x2000>;
+			reusable;
 		};
 	};
 };
