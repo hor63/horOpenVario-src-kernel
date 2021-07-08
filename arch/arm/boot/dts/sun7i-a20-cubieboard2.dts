@@ -101,13 +101,13 @@
 		};
 	};
         
-        
+
 	soc@1c00000 {
             mali: gpu@1c40000 {
                     memory-region = <&de_mali_shm>;
             };
         };
-        
+
 };
 
 &ahci {
