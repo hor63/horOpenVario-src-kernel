@@ -33,7 +33,7 @@
  *     included in all copies or substantial portions of the Software.
  *
  *     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- *     EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTI ES
+ *     EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
  *     OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
  *     NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
  *     HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
@@ -54,8 +54,8 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 		ranges;
-                
-                de_mali_shm: disp_memory {
+
+		de_mali_shm: disp_memory {
 			compatible = "shared-dma-pool";
 			size = <0x8000000>;
 			alignment = <0x2000>;
@@ -100,9 +100,8 @@
 			gpios = <&pio 7 20 GPIO_ACTIVE_HIGH>;
 		};
 	};
-        
 
-	soc@1c00000 {
+	soc {
             mali: gpu@1c40000 {
                     memory-region = <&de_mali_shm>;
             };
