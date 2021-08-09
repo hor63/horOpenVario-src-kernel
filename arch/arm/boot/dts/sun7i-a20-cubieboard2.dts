@@ -50,21 +50,6 @@
 #include <dt-bindings/interrupt-controller/irq.h>
 
 / {
-	reserved-memory {
-		#address-cells = <1>;
-		#size-cells = <1>;
-		ranges;
-
-		de_mali_shm: disp_memory {
-			compatible = "shared-dma-pool";
-			size = <0x8000000>;
-			alignment = <0x2000>;
-			reusable;
-		};
-	};
-};
-
-/ {
 	model = "Cubietech Cubieboard2";
 	compatible = "cubietech,cubieboard2", "allwinner,sun7i-a20";
 
@@ -101,12 +86,6 @@
 		};
 	};
 
-	soc {
-            mali: gpu@1c40000 {
-                    memory-region = <&de_mali_shm>;
-            };
-        };
-
 };
 
 &ahci {
@@ -124,8 +103,6 @@
 
 &de {
 	status = "okay";
-	memory-region = <&de_mali_shm>;
-
 };
 
 &ehci0 {
