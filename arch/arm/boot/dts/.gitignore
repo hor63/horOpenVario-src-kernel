@@ -1,0 +1,7 @@
+
+# Ignore all openvario .dts files.
+# They are maintained by the OpenVario team in
+# another repository, and only copied here for building
+# the .dtb images.
+
+openvario*.dts
